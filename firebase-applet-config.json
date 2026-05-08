@@ -1,0 +1,120 @@
+import React, { useMemo } from 'react';
+import { APIProvider, Map, AdvancedMarker, Pin, InfoWindow, useAdvancedMarkerRef } from '@vis.gl/react-google-maps';
+import { TripPlan, ItineraryActivity } from '../lib/gemini';
+import { MapPin } from 'lucide-react';
+
+const API_KEY = process.env.GOOGLE_MAPS_PLATFORM_KEY || '';
+const hasValidKey = Boolean(API_KEY) && API_KEY !== 'YOUR_API_KEY';
+
+interface InteractiveMapProps {
+  trip: TripPlan;
+  userLocation: { lat: number; lng: number } | null;
+}
+
+export function InteractiveMap({ trip, userLocation }: InteractiveMapProps) {
+  if (!hasValidKey) {
+    return (
+      <div className="flex items-center justify-center h-full bg-slate-50 border border-dashed border-slate-200 rounded-xl p-8 text-center">
+        <div className="max-w-xs space-y-4">
+          <div className="w-12 h-12 rounded-lg bg-blue-50 flex items-center justify-center mx-auto border border-blue-100">
+            <MapPin className="w-6 h-6 text-blue-500" />
+          </div>
+          <h2 className="text-sm font-bold text-slate-800">Grid Core Locked</h2>
+          <p className="text-slate-600 text-[10px] leading-relaxed uppercase tracking-wider font-bold">
+            Provide GOOGLE_MAPS_PLATFORM_KEY in Secrets to visualize the grid.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // Calculate default center
+  const center = useMemo(() => {
+    if (userLocation) return userLocation;
+    if (!trip.days[0]?.activities[0]) return { lat: 0, lng: 0 };
+    const firstAct = trip.days[0].activities[0];
+    return { lat: firstAct.lat || 0, lng: firstAct.lng || 0 };
+  }, [trip, userLocation]);
+
+  // Collect all markers
+  const allActivities = useMemo(() => {
+    return trip.days.flatMap(d => d.activities);
+  }, [trip]);
+
+  return (
+    <APIProvider apiKey={API_KEY} version="weekly">
+      <Map
+        defaultCenter={center}
+        defaultZoom={12}
+        mapId="NOMADIQ_MAP_ID"
+        colorScheme="DARK"
+        disableDefaultUI={true}
+        gestureHandling="cooperative"
+        internalUsageAttributionIds={['gmp_mcp_codeassist_v1_aistudio']}
+        style={{ width: '100%', height: '100%' }}
+      >
+        {userLocation && (
+          <AdvancedMarker position={userLocation}>
+            <div className="relative">
+              <div className="w-4 h-4 bg-blue-500 border-2 border-white rounded-full shadow-lg relative z-10 animate-pulse" />
+              <div className="absolute inset-0 bg-blue-400 rounded-full animate-ping opacity-20" />
+              <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 bg-white border border-slate-200 rounded px-1 text-[8px] font-bold text-slate-900 shadow-sm whitespace-nowrap">
+                YOU
+              </div>
+            </div>
+          </AdvancedMarker>
+        )}
+
+        {allActivities.map((activity, idx) => (
+          <MarkerWithLabel 
+            key={`${activity.placeName}-${idx}`} 
+            activity={activity} 
+          />
+        ))}
+      </Map>
+    </APIProvider>
+  );
+}
+
+function MarkerWithLabel(props: any) {
+  const { activity } = props;
+  const [markerRef, marker] = useAdvancedMarkerRef();
+  const [open, setOpen] = React.useState(false);
+
+  if (!activity.lat || !activity.lng) return null;
+
+  return (
+    <>
+      <AdvancedMarker 
+        ref={markerRef} 
+        position={{ lat: activity.lat, lng: activity.lng }} 
+        onClick={() => setOpen(true)}
+      >
+        <div className="group relative">
+           <Pin 
+            background="#000" 
+            glyphColor="#fff" 
+            borderColor="#fff" 
+            scale={0.8}
+          />
+          <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+            <div className="bg-black/90 backdrop-blur-md border border-white/20 rounded px-2 py-1 whitespace-nowrap">
+              <span className="text-[10px] uppercase tracking-widest text-white">{activity.placeName}</span>
+            </div>
+          </div>
+        </div>
+      </AdvancedMarker>
+      {open && (
+        <InfoWindow anchor={marker} onCloseClick={() => setOpen(false)}>
+          <div className="p-2 max-w-xs space-y-2">
+            <h4 className="text-sm font-bold text-black">{activity.placeName}</h4>
+            <p className="text-xs text-black/70">{activity.description}</p>
+            <div className="text-[9px] uppercase tracking-tighter bg-black/5 rounded inline-block px-1.5 py-0.5">
+              {activity.time} • {activity.category}
+            </div>
+          </div>
+        </InfoWindow>
+      )}
+    </>
+  );
+}

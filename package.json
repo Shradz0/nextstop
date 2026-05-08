@@ -1,0 +1,77 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isTripOwner(tripData) {
+      return isSignedIn() && request.auth.uid == tripData.userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- User Profile Validation ---
+    function isValidUser(data) {
+      return data.uid == request.auth.uid 
+        && data.email is string 
+        && data.email.size() <= 256
+        && data.keys().hasAll(['uid', 'email'])
+        && (data.displayName == null || (data.displayName is string && data.displayName.size() <= 100))
+        && (data.photoURL == null || (data.photoURL is string && data.photoURL.size() <= 1000));
+    }
+
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUser(incoming()) && incoming().createdAt == request.time;
+      allow update: if isOwner(userId) && isValidUser(incoming()) 
+        && incoming().uid == existing().uid
+        && incoming().email == existing().email
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time;
+    }
+
+    // --- Trip Validation ---
+    function isValidTrip(data) {
+      return data.userId == request.auth.uid
+        && data.destination is string && data.destination.size() <= 200
+        && data.days is list && data.days.size() <= 60 // Max 2 months trip
+        && data.keys().hasAll(['userId', 'destination', 'days']);
+    }
+
+    match /trips/{tripId} {
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow get: if isTripOwner(existing());
+      allow create: if isSignedIn() && isValidTrip(incoming()) 
+        && isValidId(tripId)
+        && incoming().createdAt == request.time;
+      allow update: if isTripOwner(existing()) && isValidTrip(incoming())
+        && incoming().userId == existing().userId
+        && incoming().destination == existing().destination
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time;
+      allow delete: if isTripOwner(existing());
+    }
+  }
+}
